@@ -1,0 +1,52 @@
+# =============================================================================
+# requirements.txt — Local Device (Edge Node)
+# Workforce Verification Platform
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# For devices with S3 model sync support, install with:
+#   pip install -r requirements.txt -r requirements-s3.txt
+#
+# Core logic uses ONLY Python standard library modules:
+#   sqlite3, json, uuid, logging, os, time, threading, socket, math, random
+#
+# The ONLY mandatory third-party dependency is 'requests' for HTTP POST
+# to AWS API Gateway. This keeps the footprint minimal so the stack runs on:
+#   - Raspberry Pi 3/4/5 (ARM, Python 3.9+)
+#   - NVIDIA Jetson Nano / Orin (CUDA-enabled ARM)
+#   - Standard Linux edge devices with 256 MB+ RAM
+# =============================================================================
+
+# HTTP client for AWS API Gateway sync POST
+requests==2.32.3
+
+# ---------------------------------------------------------------------------
+# OPTIONAL — S3 Model Distribution (sync_engine.py: fetch_model_updates_from_s3)
+#
+# Install boto3 on devices that should automatically download updated face-
+# embedding model files (.onnx, .bin, .tflite) from the 'wvp-models' S3 bucket
+# when internet connectivity is restored.
+#
+# If boto3 is NOT installed, the engine logs a warning and skips model sync
+# gracefully — data sync (POST /sync) is never affected.
+#
+# To enable:
+#   pip install boto3==1.34.144 botocore==1.34.144
+#
+# Required AWS credentials on the device (one of):
+#   - IAM EC2/Greengrass instance profile (recommended for production)
+#   - ~/.aws/credentials file (for development)
+#   - Environment: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_DEFAULT_REGION
+#
+# boto3==1.34.144      # uncomment to pin version
+# botocore==1.34.144   # uncomment to pin version
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# OPTIONAL — Development & Testing Tools (not installed in production)
+#
+# pytest==8.3.5         # test runner
+# pytest-cov==7.1.0     # coverage reporting
+# mypy==1.10.0          # static type checking
+# ---------------------------------------------------------------------------

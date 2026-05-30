@@ -1,0 +1,11 @@
+[metadata]
+stack_name            = "workforce-verification-platform"
+region                = "ap-south-1"
+confirm_changeset     = true
+capabilities          = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+parameter_overrides   = "EnvironmentName=prod DynamoDBTableName=WorkforceVerificationLogs OrganizationsTableName=WorkforceOrganizations EmployeesTableName=WorkforceEmployees S3MediaBucketName=wvp-employee-media S3ModelsBucketName=wvp-models LambdaMemorySize=512 LambdaTimeout=30 LogRetentionDays=90 EnableApiKey=true"
+
+[metadata.tags]
+Project     = "WorkforceVerificationPlatform"
+Environment = "prod"
+ManagedBy   = "SAM"

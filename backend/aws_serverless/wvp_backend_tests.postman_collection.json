@@ -1,0 +1,704 @@
+{
+  "info": {
+    "_postman_id": "wvp-backend-collection-v1",
+    "name": "Workforce Verification Platform — Full API",
+    "description": "Complete Postman test collection for the Offline-First Workforce Verification Platform.\n\nCovers all REST endpoints exposed via AWS API Gateway:\n  • POST   /sync                     — Batch edge-device log sync\n  • POST   /organizations            — Register a company workspace\n  • GET    /organizations/{id}       — Fetch workspace metadata + liveness thresholds\n  • POST   /employees                — Register employee + upload face photo to S3\n  • GET    /employees/{id}           — Fetch worker metadata\n  • PUT    /employees/{id}/embedding — Update face embedding weights\n\nUsage:\n  1. Import this file into Postman.\n  2. Set the collection variable 'BASE_URL' to your deployed API Gateway base URL.\n     Example: https://abc123def4.execute-api.ap-south-1.amazonaws.com/prod\n  3. Optionally set 'API_KEY' if EnableApiKey=true in your SAM deployment.\n  4. Run requests individually or use the Collection Runner for full suite testing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0
+    }
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "https://YOUR_API_ID.execute-api.ap-south-1.amazonaws.com/prod",
+      "description": "Base URL of your deployed API Gateway. Replace with the 'ApiBaseUrl' SAM output value.",
+      "type": "string"
+    },
+    {
+      "key": "API_KEY",
+      "value": "YOUR_API_KEY_HERE",
+      "description": "API Gateway API Key (x-api-key header). Leave blank if EnableApiKey=false.",
+      "type": "string"
+    },
+    {
+      "key": "ORG_ID",
+      "value": "00000000-0000-0000-0000-000000000001",
+      "description": "Auto-populated after running 'Register Organization'. Used in subsequent requests.",
+      "type": "string"
+    },
+    {
+      "key": "EMPLOYEE_ID",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "description": "Auto-populated after running 'Register Employee'. Used in subsequent requests.",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key":   "key",
+        "value": "x-api-key",
+        "type":  "string"
+      },
+      {
+        "key":   "value",
+        "value": "{{API_KEY}}",
+        "type":  "string"
+      },
+      {
+        "key":   "in",
+        "value": "header",
+        "type":  "string"
+      }
+    ]
+  },
+  "item": [
+
+    {
+      "name": "1. Organizations",
+      "description": "Endpoints for managing company workspace (organization) records.",
+      "item": [
+
+        {
+          "name": "POST /organizations — Register Organization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response has organization_id', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('organization_id');",
+                  "    pm.expect(body.organization_id).to.be.a('string');",
+                  "    // Auto-populate collection variable for downstream requests",
+                  "    pm.collectionVariables.set('ORG_ID', body.organization_id);",
+                  "    console.log('ORG_ID set to:', body.organization_id);",
+                  "});",
+                  "",
+                  "pm.test('Status field is created', function () {",
+                  "    pm.expect(pm.response.json().status).to.equal('created');",
+                  "});",
+                  "",
+                  "pm.test('liveness_threshold is present', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('liveness_threshold');",
+                  "    pm.expect(body.liveness_threshold).to.be.a('number');",
+                  "});",
+                  "",
+                  "pm.test('Response time under 3000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(3000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "POST",
+            "description": "Register a new company workspace (organization). The liveness_threshold field controls the minimum face liveness confidence score required for this org's employees to clock in.",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-api-key",    "value": "{{API_KEY}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nexus Construction Group\",\n  \"region\": \"APAC\",\n  \"contact_email\": \"admin@nexusconstruction.com\",\n  \"liveness_threshold\": 0.82\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw":      "{{BASE_URL}}/organizations",
+              "host":     ["{{BASE_URL}}"],
+              "path":     ["organizations"],
+              "variable": []
+            }
+          },
+          "response": [
+            {
+              "name":   "201 Created — Organization registered successfully",
+              "status": "Created",
+              "code":   201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"created\",\n  \"organization_id\": \"b890760f-b758-46f1-96bb-516588ad8c21\",\n  \"name\": \"Nexus Construction Group\",\n  \"region\": \"APAC\",\n  \"liveness_threshold\": 0.82,\n  \"created_at\": \"2024-01-15T08:00:00+00:00\",\n  \"request_id\": \"abc123\"\n}"
+            },
+            {
+              "name":   "409 Conflict — Organization already exists",
+              "status": "Conflict",
+              "code":   409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"conflict\",\n  \"error\": \"Organization 'b890760f-...' already exists.\",\n  \"request_id\": \"def456\"\n}"
+            },
+            {
+              "name":   "422 Unprocessable — Missing required field",
+              "status": "Unprocessable Entity",
+              "code":   422,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"'name' is required.\",\n  \"request_id\": \"ghi789\"\n}"
+            }
+          ]
+        },
+
+        {
+          "name": "GET /organizations/{id} — Fetch Organization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has organization object', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('organization');",
+                  "    pm.expect(body.organization).to.have.property('organization_id');",
+                  "    pm.expect(body.organization).to.have.property('liveness_threshold');",
+                  "});",
+                  "",
+                  "pm.test('Status field is ok', function () {",
+                  "    pm.expect(pm.response.json().status).to.equal('ok');",
+                  "});",
+                  "",
+                  "pm.test('Response time under 2000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "GET",
+            "description": "Retrieve workspace metadata including the organization's adaptive liveness_threshold. Edge devices use this value to decide whether to grant or deny access for borderline liveness scores.",
+            "header": [
+              { "key": "x-api-key", "value": "{{API_KEY}}" }
+            ],
+            "url": {
+              "raw":      "{{BASE_URL}}/organizations/{{ORG_ID}}",
+              "host":     ["{{BASE_URL}}"],
+              "path":     ["organizations", "{{ORG_ID}}"],
+              "variable": [
+                {
+                  "key":         "id",
+                  "value":       "{{ORG_ID}}",
+                  "description": "Organization UUID — auto-populated from POST /organizations."
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name":   "200 OK — Organization found",
+              "status": "OK",
+              "code":   200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"ok\",\n  \"organization\": {\n    \"organization_id\": \"b890760f-b758-46f1-96bb-516588ad8c21\",\n    \"name\": \"Nexus Construction Group\",\n    \"region\": \"APAC\",\n    \"contact_email\": \"admin@nexusconstruction.com\",\n    \"is_active\": true,\n    \"liveness_threshold\": 0.82,\n    \"created_at\": \"2024-01-15T08:00:00+00:00\",\n    \"updated_at\": \"2024-01-15T08:00:00+00:00\"\n  },\n  \"request_id\": \"abc123\"\n}"
+            },
+            {
+              "name":   "404 Not Found — Organization does not exist",
+              "status": "Not Found",
+              "code":   404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"not_found\",\n  \"error\": \"Organization 'b890760f-...' does not exist.\",\n  \"request_id\": \"def456\"\n}"
+            }
+          ]
+        }
+
+      ]
+    },
+
+    {
+      "name": "2. Employees",
+      "description": "Endpoints for managing employee biometric registrations.",
+      "item": [
+
+        {
+          "name": "POST /employees — Register Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response has employee_id', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('employee_id');",
+                  "    pm.collectionVariables.set('EMPLOYEE_ID', body.employee_id);",
+                  "    console.log('EMPLOYEE_ID set to:', body.employee_id);",
+                  "});",
+                  "",
+                  "pm.test('embedding_dims is 512', function () {",
+                  "    pm.expect(pm.response.json().embedding_dims).to.equal(512);",
+                  "});",
+                  "",
+                  "pm.test('Status field is created', function () {",
+                  "    pm.expect(pm.response.json().status).to.equal('created');",
+                  "});",
+                  "",
+                  "pm.test('Response time under 5000ms (includes S3 upload)', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "POST",
+            "description": "Register a new employee with biometric metadata.\n\nThe face_embedding is a pre-computed floating-point vector from your on-device AI model (FaceNet, ArcFace, etc.).\n\nIf face_photo_b64 is provided, the raw JPEG is decoded and uploaded to the S3 bucket 'wvp-employee-media' at:\n  employees/{organization_id}/{employee_id}/enrollment.jpg\n\nThe face_photo_b64 in this example is a minimal placeholder — replace with a real base64-encoded JPEG.",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-api-key",    "value": "{{API_KEY}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization_id\": \"{{ORG_ID}}\",\n  \"full_name\": \"Arjun Sharma\",\n  \"department\": \"Civil Engineering\",\n  \"role\": \"Senior Engineer\",\n  \"embedding_model\": \"arcface_iresnet100_512d\",\n  \"face_embedding\": [\n    0.1231, -0.4562, 0.7890, 0.2341, -0.6782, 0.1234, -0.9876, 0.3456,\n    0.5678, -0.2345, 0.8901, -0.4567, 0.1234, 0.6789, -0.3456, 0.7890,\n    -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678,\n    0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345,\n    -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901,\n    0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456,\n    0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345,\n    0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234,\n    0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678,\n    -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341,\n    0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901,\n    -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678,\n    0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345,\n    -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901,\n    0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456,\n    0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345,\n    0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234,\n    0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678,\n    -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341,\n    0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901,\n    -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678,\n    0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345,\n    -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901,\n    0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456,\n    0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345,\n    0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234,\n    0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678,\n    -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341,\n    0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901,\n    -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678,\n    0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345,\n    -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901,\n    0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456,\n    0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345,\n    0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234,\n    0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678,\n    -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341,\n    0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901,\n    -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678,\n    0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345,\n    -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901,\n    0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456,\n    0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345,\n    0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234,\n    0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678,\n    -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341,\n    0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901,\n    -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678,\n    0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345,\n    -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901,\n    0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456,\n    0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345,\n    0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234,\n    0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678,\n    -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341,\n    0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345, -0.4567, 0.8901,\n    -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901, 0.1234, -0.5678,\n    0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456, 0.5678, 0.2345,\n    -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345, 0.4567, -0.8901,\n    0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234, 0.9876, -0.3456,\n    0.5678, 0.2345, -0.4567, 0.8901, -0.1234, 0.5678, -0.7890, 0.2345,\n    0.4567, -0.8901, 0.1234, -0.5678, 0.7890, -0.2341, 0.6782, -0.1234,\n    0.9876, -0.3456, 0.5678, 0.2345\n  ],\n  \"face_photo_b64\": \"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AJQAB/9k=\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw":  "{{BASE_URL}}/employees",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees"]
+            }
+          },
+          "response": [
+            {
+              "name":   "201 Created — Employee registered, photo uploaded to S3",
+              "status": "Created",
+              "code":   201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"created\",\n  \"employee_id\": \"d746f99d-1234-5678-abcd-efgh01234567\",\n  \"organization_id\": \"b890760f-b758-46f1-96bb-516588ad8c21\",\n  \"full_name\": \"Arjun Sharma\",\n  \"embedding_model\": \"arcface_iresnet100_512d\",\n  \"embedding_dims\": 512,\n  \"face_photo_s3_key\": \"employees/b890760f-.../d746f99d-.../enrollment.jpg\",\n  \"face_photo_url\": \"s3://wvp-employee-media/employees/b890760f-.../d746f99d-.../enrollment.jpg\",\n  \"created_at\": \"2024-01-15T08:00:00+00:00\",\n  \"request_id\": \"abc123\"\n}"
+            },
+            {
+              "name":   "201 Created — Employee registered, no photo provided",
+              "status": "Created",
+              "code":   201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"created\",\n  \"employee_id\": \"d746f99d-1234-5678-abcd-efgh01234567\",\n  \"organization_id\": \"b890760f-b758-46f1-96bb-516588ad8c21\",\n  \"full_name\": \"Arjun Sharma\",\n  \"embedding_model\": \"arcface_iresnet100_512d\",\n  \"embedding_dims\": 512,\n  \"face_photo_s3_key\": null,\n  \"created_at\": \"2024-01-15T08:00:00+00:00\",\n  \"request_id\": \"abc123\"\n}"
+            },
+            {
+              "name":   "422 — Invalid embedding dimensions",
+              "status": "Unprocessable Entity",
+              "code":   422,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"error\",\n  \"error\": \"'face_embedding' has 64 dimensions; expected 128, 256, or 512.\",\n  \"request_id\": \"def456\"\n}"
+            }
+          ]
+        },
+
+        {
+          "name": "GET /employees/{id} — Fetch Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has employee object', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('employee');",
+                  "    pm.expect(body.employee).to.have.property('employee_id');",
+                  "    pm.expect(body.employee).to.have.property('face_embedding');",
+                  "    pm.expect(body.employee.face_embedding).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Embedding is deserialized as array', function () {",
+                  "    const emb = pm.response.json().employee.face_embedding;",
+                  "    pm.expect(emb.length).to.be.oneOf([128, 256, 512]);",
+                  "});",
+                  "",
+                  "pm.test('Response time under 2000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "GET",
+            "description": "Fetch full worker metadata including deserialized face_embedding vector, embedding model name, S3 photo key, and all registration fields.",
+            "header": [
+              { "key": "x-api-key", "value": "{{API_KEY}}" }
+            ],
+            "url": {
+              "raw":      "{{BASE_URL}}/employees/{{EMPLOYEE_ID}}",
+              "host":     ["{{BASE_URL}}"],
+              "path":     ["employees", "{{EMPLOYEE_ID}}"],
+              "variable": [
+                {
+                  "key":         "id",
+                  "value":       "{{EMPLOYEE_ID}}",
+                  "description": "Employee UUID — auto-populated from POST /employees."
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name":   "200 OK — Employee found",
+              "status": "OK",
+              "code":   200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"ok\",\n  \"employee\": {\n    \"employee_id\": \"d746f99d-...\",\n    \"organization_id\": \"b890760f-...\",\n    \"full_name\": \"Arjun Sharma\",\n    \"department\": \"Civil Engineering\",\n    \"role\": \"Senior Engineer\",\n    \"embedding_model\": \"arcface_iresnet100_512d\",\n    \"face_embedding\": [0.1231, -0.4562, 0.7890, \"...\"],\n    \"face_photo_s3_key\": \"employees/.../enrollment.jpg\",\n    \"is_active\": true,\n    \"created_at\": \"2024-01-15T08:00:00+00:00\",\n    \"updated_at\": \"2024-01-15T08:00:00+00:00\"\n  },\n  \"request_id\": \"abc123\"\n}"
+            },
+            {
+              "name":   "404 Not Found",
+              "status": "Not Found",
+              "code":   404,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"not_found\",\n  \"error\": \"Employee 'd746f99d-...' does not exist.\",\n  \"request_id\": \"def456\"\n}"
+            }
+          ]
+        },
+
+        {
+          "name": "PUT /employees/{id}/embedding — Update Face Embedding",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Status field is updated', function () {",
+                  "    pm.expect(pm.response.json().status).to.equal('updated');",
+                  "});",
+                  "",
+                  "pm.test('Response has updated_at', function () {",
+                  "    pm.expect(pm.response.json()).to.have.property('updated_at');",
+                  "});",
+                  "",
+                  "pm.test('embedding_dims matches sent vector', function () {",
+                  "    pm.expect(pm.response.json().embedding_dims).to.equal(512);",
+                  "});",
+                  "",
+                  "pm.test('Response time under 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "PUT",
+            "description": "Update or re-calibrate an employee's facial feature weights. Use this endpoint after re-enrollment (e.g., after significant appearance change, new camera hardware, or model upgrade). Optionally uploads a new enrollment photo to S3.",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-api-key",    "value": "{{API_KEY}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"embedding_model\": \"arcface_iresnet100_512d_v2\",\n  \"face_embedding\": [\n    0.9876, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890,\n    0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345,\n    0.6789, -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789,\n    -0.1234, 0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234,\n    0.5678, -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678,\n    -0.9012, 0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012,\n    0.3456, -0.7890, 0.2345, 0.6789, -0.1234, 0.5678, -0.9012, 0.3456,\n    -0.7890, 0.2345, 0.6789, -0.1234\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw":      "{{BASE_URL}}/employees/{{EMPLOYEE_ID}}/embedding",
+              "host":     ["{{BASE_URL}}"],
+              "path":     ["employees", "{{EMPLOYEE_ID}}", "embedding"],
+              "variable": [
+                {
+                  "key":   "id",
+                  "value": "{{EMPLOYEE_ID}}"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name":   "200 OK — Embedding updated",
+              "status": "OK",
+              "code":   200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"updated\",\n  \"employee_id\": \"d746f99d-...\",\n  \"embedding_model\": \"arcface_iresnet100_512d_v2\",\n  \"embedding_dims\": 512,\n  \"face_photo_s3_key\": null,\n  \"updated_at\": \"2024-01-20T10:30:00+00:00\",\n  \"request_id\": \"xyz789\"\n}"
+            },
+            {
+              "name":   "404 Not Found — Employee does not exist",
+              "status": "Not Found",
+              "code":   404,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"not_found\",\n  \"error\": \"Employee 'd746f99d-...' does not exist.\",\n  \"request_id\": \"def456\"\n}"
+            }
+          ]
+        }
+
+      ]
+    },
+
+    {
+      "name": "3. Sync",
+      "description": "POST /sync — Batch edge-device verification log synchronization.",
+      "item": [
+
+        {
+          "name": "POST /sync — Single Log Batch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Status field is ok', function () {",
+                  "    pm.expect(pm.response.json().status).to.equal('ok');",
+                  "});",
+                  "",
+                  "pm.test('confirmed_log_ids is an array', function () {",
+                  "    pm.expect(pm.response.json().confirmed_log_ids).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('log_id is confirmed', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.confirmed_log_ids.length).to.be.greaterThan(0);",
+                  "});",
+                  "",
+                  "pm.test('request_id is a valid UUID', function () {",
+                  "    const id = pm.response.json().request_id;",
+                  "    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;",
+                  "    pm.expect(uuidRegex.test(id)).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('CORS header present', function () {",
+                  "    pm.expect(pm.response.headers.get('Access-Control-Allow-Origin')).to.equal('*');",
+                  "});",
+                  "",
+                  "pm.test('Response time under 5000ms', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "POST",
+            "description": "Synchronize a batch of edge-device verification events to AWS DynamoDB.\n\nThe Lambda performs idempotency checks using a GSI on log_id before writing.\nIf a log_id was already received, it is returned in duplicate_log_ids (not an error).\n\nEdge devices use the returned confirmed_log_ids + duplicate_log_ids list to\nHARD DELETE rows from their local sync_queue (Phase 5 purge behavior).",
+            "header": [
+              { "key": "Content-Type",   "value": "application/json" },
+              { "key": "x-api-key",      "value": "{{API_KEY}}" },
+              { "key": "X-Device-ID",    "value": "EDGE-DEVICE-001" },
+              { "key": "X-Sync-Attempt", "value": "1" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"EDGE-DEVICE-001\",\n  \"sync_timestamp\": \"2024-01-15T08:05:00+00:00\",\n  \"entry_count\": 1,\n  \"logs\": [\n    {\n      \"log_id\":             \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"organization_id\":    \"{{ORG_ID}}\",\n      \"employee_id\":        \"{{EMPLOYEE_ID}}\",\n      \"event_type\":         \"CLOCK_IN\",\n      \"verification_score\": 0.9412,\n      \"liveness_score\":     0.9750,\n      \"liveness_passed\":    true,\n      \"device_id\":          \"EDGE-DEVICE-001\",\n      \"latitude\":           19.0760,\n      \"longitude\":          72.8777,\n      \"timestamp\":          \"2024-01-15T08:00:00+00:00\",\n      \"metadata\": {\n        \"firmware_version\": \"v2.1.4\",\n        \"camera_id\":        \"CAM-A\",\n        \"ambient_light\":    \"bright\"\n      }\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw":  "{{BASE_URL}}/sync",
+              "host": ["{{BASE_URL}}"],
+              "path": ["sync"]
+            }
+          },
+          "response": [
+            {
+              "name":   "200 OK — 1 log confirmed",
+              "status": "OK",
+              "code":   200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"ok\",\n  \"confirmed_log_ids\": [\"a1b2c3d4-e5f6-7890-abcd-ef1234567890\"],\n  \"duplicate_log_ids\": [],\n  \"error_log_ids\":     [],\n  \"message\":           \"Processed 1 events: 1 new, 0 duplicate.\",\n  \"request_id\":        \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n  \"ingestion_time\":    \"2024-01-15T08:05:00.123456+00:00\"\n}"
+            },
+            {
+              "name":   "200 OK — Duplicate log (idempotent retry)",
+              "status": "OK",
+              "code":   200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"ok\",\n  \"confirmed_log_ids\": [],\n  \"duplicate_log_ids\": [\"a1b2c3d4-e5f6-7890-abcd-ef1234567890\"],\n  \"error_log_ids\":     [],\n  \"message\":           \"Processed 1 events: 0 new, 1 duplicate.\",\n  \"request_id\":        \"7ba85f64-5717-4562-b3fc-2c963f66bbb9\",\n  \"ingestion_time\":    \"2024-01-15T08:06:00.789012+00:00\"\n}"
+            }
+          ]
+        },
+
+        {
+          "name": "POST /sync — Multi-Org Batch (5 Logs)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('All 5 logs confirmed or duplicate', function () {",
+                  "    const body = pm.response.json();",
+                  "    const total = body.confirmed_log_ids.length + body.duplicate_log_ids.length;",
+                  "    pm.expect(total).to.equal(5);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "POST",
+            "description": "Stress test with 5 log entries across 2 organizations, including CLOCK_IN, CLOCK_OUT, ACCESS_GRANTED, and ACCESS_DENIED events.",
+            "header": [
+              { "key": "Content-Type",   "value": "application/json" },
+              { "key": "x-api-key",      "value": "{{API_KEY}}" },
+              { "key": "X-Device-ID",    "value": "EDGE-DEVICE-002" },
+              { "key": "X-Sync-Attempt", "value": "1" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"EDGE-DEVICE-002\",\n  \"sync_timestamp\": \"2024-01-15T09:00:00+00:00\",\n  \"entry_count\": 5,\n  \"logs\": [\n    {\n      \"log_id\":             \"11111111-1111-1111-1111-111111111111\",\n      \"organization_id\":    \"{{ORG_ID}}\",\n      \"employee_id\":        \"{{EMPLOYEE_ID}}\",\n      \"event_type\":         \"CLOCK_IN\",\n      \"verification_score\": 0.9512,\n      \"liveness_score\":     0.9800,\n      \"liveness_passed\":    true,\n      \"device_id\":          \"EDGE-DEVICE-002\",\n      \"timestamp\":          \"2024-01-15T08:00:00+00:00\",\n      \"metadata\":           {}\n    },\n    {\n      \"log_id\":             \"22222222-2222-2222-2222-222222222222\",\n      \"organization_id\":    \"{{ORG_ID}}\",\n      \"employee_id\":        \"{{EMPLOYEE_ID}}\",\n      \"event_type\":         \"ACCESS_GRANTED\",\n      \"verification_score\": 0.8830,\n      \"liveness_score\":     0.9100,\n      \"liveness_passed\":    true,\n      \"device_id\":          \"EDGE-DEVICE-002\",\n      \"latitude\":           19.0760,\n      \"longitude\":          72.8777,\n      \"timestamp\":          \"2024-01-15T08:15:00+00:00\",\n      \"metadata\":           {\"zone\": \"restricted-area-B\"}\n    },\n    {\n      \"log_id\":             \"33333333-3333-3333-3333-333333333333\",\n      \"organization_id\":    \"{{ORG_ID}}\",\n      \"employee_id\":        \"{{EMPLOYEE_ID}}\",\n      \"event_type\":         \"ACCESS_DENIED\",\n      \"verification_score\": 0.3120,\n      \"liveness_score\":     0.9900,\n      \"liveness_passed\":    true,\n      \"device_id\":          \"EDGE-DEVICE-002\",\n      \"timestamp\":          \"2024-01-15T08:20:00+00:00\",\n      \"metadata\":           {\"reason\": \"score_below_threshold\"}\n    },\n    {\n      \"log_id\":             \"44444444-4444-4444-4444-444444444444\",\n      \"organization_id\":    \"{{ORG_ID}}\",\n      \"employee_id\":        \"{{EMPLOYEE_ID}}\",\n      \"event_type\":         \"CLOCK_OUT\",\n      \"verification_score\": 0.9100,\n      \"liveness_score\":     0.9600,\n      \"liveness_passed\":    true,\n      \"device_id\":          \"EDGE-DEVICE-002\",\n      \"timestamp\":          \"2024-01-15T17:00:00+00:00\",\n      \"metadata\":           {}\n    },\n    {\n      \"log_id\":             \"55555555-5555-5555-5555-555555555555\",\n      \"organization_id\":    \"{{ORG_ID}}\",\n      \"employee_id\":        \"{{EMPLOYEE_ID}}\",\n      \"event_type\":         \"CLOCK_IN\",\n      \"verification_score\": 0.8800,\n      \"liveness_score\":     0.8500,\n      \"liveness_passed\":    true,\n      \"device_id\":          \"EDGE-DEVICE-002\",\n      \"timestamp\":          \"2024-01-16T07:58:00+00:00\",\n      \"metadata\":           {\"fw\": \"v2.1.5\"}\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw":  "{{BASE_URL}}/sync",
+              "host": ["{{BASE_URL}}"],
+              "path": ["sync"]
+            }
+          },
+          "response": []
+        },
+
+        {
+          "name": "POST /sync — 422 Empty Logs Array",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 422', function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test('Error field is present', function () {",
+                  "    pm.expect(pm.response.json()).to.have.property('error');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Validation test — empty logs array should return 422.",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-api-key",   "value": "{{API_KEY}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"EDGE-DEVICE-001\",\n  \"logs\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw":  "{{BASE_URL}}/sync",
+              "host": ["{{BASE_URL}}"],
+              "path": ["sync"]
+            }
+          },
+          "response": []
+        }
+
+      ]
+    },
+
+    {
+      "name": "4. Health & CORS",
+      "description": "CORS preflight and route-not-found edge case tests.",
+      "item": [
+
+        {
+          "name": "OPTIONS /sync — CORS Preflight",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('CORS Allow-Origin header present', function () {",
+                  "    pm.expect(pm.response.headers.get('Access-Control-Allow-Origin')).to.equal('*');",
+                  "});",
+                  "pm.test('CORS Allow-Methods header present', function () {",
+                  "    pm.expect(pm.response.headers.get('Access-Control-Allow-Methods')).to.include('POST');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "OPTIONS",
+            "description": "CORS preflight for browser-based admin dashboards.",
+            "header": [
+              { "key": "Origin",                         "value": "https://admin.wvp.example.com" },
+              { "key": "Access-Control-Request-Method",  "value": "POST" },
+              { "key": "Access-Control-Request-Headers", "value": "Content-Type, x-api-key" }
+            ],
+            "url": {
+              "raw":  "{{BASE_URL}}/sync",
+              "host": ["{{BASE_URL}}"],
+              "path": ["sync"]
+            }
+          },
+          "response": []
+        },
+
+        {
+          "name": "GET /unknown-route — 404 Not Found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test('Error message present', function () {",
+                  "    pm.expect(pm.response.json()).to.have.property('error');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method":      "GET",
+            "description": "Tests that undefined routes return proper 404 with an informative message.",
+            "header": [
+              { "key": "x-api-key", "value": "{{API_KEY}}" }
+            ],
+            "url": {
+              "raw":  "{{BASE_URL}}/unknown-route",
+              "host": ["{{BASE_URL}}"],
+              "path": ["unknown-route"]
+            }
+          },
+          "response": []
+        }
+
+      ]
+    }
+
+  ]
+}

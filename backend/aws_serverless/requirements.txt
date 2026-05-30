@@ -1,0 +1,16 @@
+# =============================================================================
+# requirements.txt — AWS Lambda Function
+# Workforce Verification Platform
+#
+# This file is packaged by `sam build` into the Lambda deployment ZIP.
+#
+# boto3 is pre-installed in the Lambda runtime environment but is listed
+# explicitly here to pin the version and ensure local testing consistency.
+#
+# Deploy via:
+#   sam build && sam deploy
+# =============================================================================
+
+# AWS SDK — DynamoDB PutItem, Query, DescribeTable operations
+boto3==1.34.144
+botocore==1.34.144

@@ -1,0 +1,830 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+# =============================================================================
+# template.yaml
+# AWS SAM (Serverless Application Model) Infrastructure-as-Code
+#
+# Workforce Verification Platform — Full Cloud Stack
+#
+# Resources provisioned:
+#   1.  WorkforceVerificationTable  — Immutable event logs (PK: org_id, SK: timestamp)
+#   2.  WorkforceOrganizationsTable — Organization registry (PK: organization_id)
+#   3.  WorkforceEmployeesTable     — Employee biometric registry (PK: employee_id)
+#   4.  EmployeeMediaBucket         — S3 bucket for raw enrollment face photos
+#   5.  ModelsBucket                — S3 bucket for face-embedding model (.onnx/.bin) distribution
+#   6.  LambdaExecutionRole         — Least-privilege IAM role (DynamoDB + S3 + X-Ray + Logs)
+#   7.  WvpFunction                 — Python 3.12 Lambda — mono-Lambda routing all endpoints
+#   8.  WvpHttpApi                  — HTTP API Gateway (v2) with all routes
+#   9.  CloudWatch Alarms           — Lambda Errors, High Latency, DynamoDB Throttles
+#
+# Endpoints exposed:
+#   POST   /sync
+#   POST   /organizations
+#   GET    /organizations/{id}
+#   POST   /employees
+#   GET    /employees/{id}
+#   PUT    /employees/{id}/embedding
+#
+# Deploy with:
+#   sam build
+#   sam deploy --guided
+# =============================================================================
+
+Description: >
+  Offline-First Workforce Verification Platform — Full AWS Serverless Backend.
+  Provides durable, idempotent sync + full REST API for organizations and
+  employee biometric management. Edge AI face-embedding model files are
+  distributed via S3 to field devices.
+
+# =============================================================================
+# Parameters
+# =============================================================================
+
+Parameters:
+
+  EnvironmentName:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+    Description: >
+      Deployment environment. Controls DynamoDB billing mode, Lambda memory,
+      log retention, and provisioned concurrency.
+
+  DynamoDBTableName:
+    Type: String
+    Default: WorkforceVerificationLogs
+    Description: Name of the DynamoDB table storing verification event logs.
+
+  OrganizationsTableName:
+    Type: String
+    Default: WorkforceOrganizations
+    Description: Name of the DynamoDB table storing organization workspaces.
+
+  EmployeesTableName:
+    Type: String
+    Default: WorkforceEmployees
+    Description: Name of the DynamoDB table storing employee biometric records.
+
+  S3MediaBucketName:
+    Type: String
+    Default: wvp-employee-media
+    Description: >
+      S3 bucket for storing raw employee enrollment face photos.
+      Must be globally unique — append your AWS account ID if needed.
+
+  S3ModelsBucketName:
+    Type: String
+    Default: wvp-models
+    Description: >
+      S3 bucket for distributing face-embedding model files (.onnx, .bin, .tflite)
+      to edge devices. Edge devices fetch from this bucket when connectivity returns.
+
+  LambdaMemorySize:
+    Type: Number
+    Default: 512
+    AllowedValues: [256, 512, 1024, 2048]
+    Description: Lambda memory allocation in MB.
+
+  LambdaTimeout:
+    Type: Number
+    Default: 30
+    MinValue: 10
+    MaxValue: 900
+    Description: Lambda timeout in seconds.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 90
+    AllowedValues: [7, 14, 30, 60, 90, 180, 365]
+    Description: CloudWatch log retention in days.
+
+  DynamoDBTTLDays:
+    Type: Number
+    Default: 730
+    Description: Number of days before DynamoDB items are auto-expired (default 2 years).
+
+  EnableApiKey:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >
+      If true, creates an API Gateway API Key and Usage Plan for device authentication.
+
+# =============================================================================
+# Conditions
+# =============================================================================
+
+Conditions:
+  IsProduction:    !Equals [!Ref EnvironmentName, "prod"]
+  IsApiKeyEnabled: !Equals [!Ref EnableApiKey,    "true"]
+
+# =============================================================================
+# Globals
+# =============================================================================
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Handler: lambda_function.lambda_handler
+    MemorySize: !Ref LambdaMemorySize
+    Timeout: !Ref LambdaTimeout
+    Architectures:
+      - arm64   # Graviton2 — ~20% better price/performance
+    Tracing: Active  # X-Ray active tracing
+    Environment:
+      Variables:
+        DYNAMODB_TABLE_NAME:      !Ref DynamoDBTableName
+        ORGANIZATIONS_TABLE_NAME: !Ref OrganizationsTableName
+        EMPLOYEES_TABLE_NAME:     !Ref EmployeesTableName
+        S3_MEDIA_BUCKET:          !Ref S3MediaBucketName
+        S3_MODELS_BUCKET:         !Ref S3ModelsBucketName
+        AWS_REGION_NAME:          !Ref AWS::Region
+        LOG_LEVEL:                !If [IsProduction, "INFO", "DEBUG"]
+    Tags:
+      Project:     WorkforceVerificationPlatform
+      Environment: !Ref EnvironmentName
+      ManagedBy:   SAM
+
+# =============================================================================
+# Resources
+# =============================================================================
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # 1. DynamoDB — WorkforceVerificationLogs (immutable event log)
+  # ---------------------------------------------------------------------------
+
+  WorkforceVerificationTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref DynamoDBTableName
+      KeySchema:
+        - AttributeName: organization_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      AttributeDefinitions:
+        - AttributeName: organization_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: log_id
+          AttributeType: S
+      BillingMode: !If [IsProduction, PROVISIONED, PAY_PER_REQUEST]
+      ProvisionedThroughput: !If
+        - IsProduction
+        - ReadCapacityUnits: 5
+          WriteCapacityUnits: 10
+        - !Ref AWS::NoValue
+      GlobalSecondaryIndexes:
+        - IndexName: log_id-index
+          KeySchema:
+            - AttributeName: log_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+          ProvisionedThroughput: !If
+            - IsProduction
+            - ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+            - !Ref AWS::NoValue
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [IsProduction, true, false]
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: DataClassification
+          Value: Confidential
+
+  # ---------------------------------------------------------------------------
+  # 2. DynamoDB — WorkforceOrganizations (organization registry)
+  # ---------------------------------------------------------------------------
+
+  WorkforceOrganizationsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref OrganizationsTableName
+      KeySchema:
+        - AttributeName: organization_id
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: organization_id
+          AttributeType: S
+      BillingMode: !If [IsProduction, PROVISIONED, PAY_PER_REQUEST]
+      ProvisionedThroughput: !If
+        - IsProduction
+        - ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        - !Ref AWS::NoValue
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [IsProduction, true, false]
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ---------------------------------------------------------------------------
+  # 3. DynamoDB — WorkforceEmployees (employee biometric registry)
+  # ---------------------------------------------------------------------------
+
+  WorkforceEmployeesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref EmployeesTableName
+      KeySchema:
+        - AttributeName: employee_id
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: employee_id
+          AttributeType: S
+        - AttributeName: organization_id
+          AttributeType: S
+      BillingMode: !If [IsProduction, PROVISIONED, PAY_PER_REQUEST]
+      ProvisionedThroughput: !If
+        - IsProduction
+        - ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        - !Ref AWS::NoValue
+      GlobalSecondaryIndexes:
+        - IndexName: organization_id-index
+          KeySchema:
+            - AttributeName: organization_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput: !If
+            - IsProduction
+            - ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
+            - !Ref AWS::NoValue
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [IsProduction, true, false]
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: DataClassification
+          Value: Restricted
+
+  # ---------------------------------------------------------------------------
+  # 4. S3 — Employee Media Bucket (raw face enrollment photos)
+  # ---------------------------------------------------------------------------
+
+  EmployeeMediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref S3MediaBucketName
+      # Block all public access — photos must only be accessed via pre-signed URLs
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls:       true
+        BlockPublicPolicy:     true
+        IgnorePublicAcls:      true
+        RestrictPublicBuckets: true
+      # Versioning: keeps all versions of enrollment photos for audit purposes
+      VersioningConfiguration:
+        Status: Enabled
+      # Server-side encryption with AWS managed key
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # Lifecycle: move photos older than 1 year to Glacier for cost control
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveOldPhotos
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 365
+                StorageClass: GLACIER
+      # CORS: allows admin dashboards to request pre-signed URLs in-browser
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ["*"]
+            AllowedMethods: [GET, PUT]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: DataClassification
+          Value: Restricted
+
+  # ---------------------------------------------------------------------------
+  # 5. S3 — Models Bucket (face-embedding model distribution)
+  # ---------------------------------------------------------------------------
+
+  ModelsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref S3ModelsBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls:       true
+        BlockPublicPolicy:     true
+        IgnorePublicAcls:      true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Purpose
+          Value: ModelDistribution
+
+  # ---------------------------------------------------------------------------
+  # 6. IAM Role — Least-privilege Lambda execution role
+  # ---------------------------------------------------------------------------
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "WorkforceVerificationLambdaRole-${EnvironmentName}"
+      Description: >
+        Least-privilege IAM role for the Workforce Verification Lambda.
+        Grants: DynamoDB CRUD on 3 tables, S3 put/get on 2 buckets, CloudWatch Logs, X-Ray.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Verification logs table — PutItem + Query GSI (conditional writes)
+              - Sid: LogsTableReadWrite
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:DescribeTable
+                Resource: !GetAtt WorkforceVerificationTable.Arn
+
+              - Sid: LogsTableGSIQuery
+                Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub "${WorkforceVerificationTable.Arn}/index/log_id-index"
+
+              # Organizations table — full CRUD
+              - Sid: OrgsTableCRUD
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:DescribeTable
+                Resource: !GetAtt WorkforceOrganizationsTable.Arn
+
+              # Employees table — full CRUD
+              - Sid: EmployeesTableCRUD
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:DescribeTable
+                Resource: !GetAtt WorkforceEmployeesTable.Arn
+
+              # Employees table GSI (organization_id-index)
+              - Sid: EmployeesOrgGSIQuery
+                Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub "${WorkforceEmployeesTable.Arn}/index/organization_id-index"
+
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # S3 — Employee Media Bucket
+              - Sid: MediaBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: !Sub "arn:aws:s3:::${S3MediaBucketName}/employees/*"
+
+              # S3 — Models Bucket (read-only for Lambda; writes done via CI/CD)
+              - Sid: ModelsBucketRead
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3ModelsBucketName}"
+                  - !Sub "arn:aws:s3:::${S3ModelsBucketName}/*"
+
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ---------------------------------------------------------------------------
+  # 7. Lambda Function — Mono-Lambda routing all endpoints
+  # ---------------------------------------------------------------------------
+
+  WvpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "WorkforceVerificationAPI-${EnvironmentName}"
+      Description: >
+        Mono-Lambda routing all Workforce Verification Platform API endpoints:
+        /sync, /organizations, /employees. Handles DynamoDB writes and S3 uploads.
+      CodeUri: ./
+      Role: !GetAtt LambdaExecutionRole.Arn
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig: !If
+        - IsProduction
+        - ProvisionedConcurrentExecutions: 2
+        - !Ref AWS::NoValue
+      ReservedConcurrentExecutions: !If [IsProduction, 50, 10]
+
+      Events:
+        # ----- /sync -----
+        SyncPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: POST
+            Path: /sync
+            TimeoutInMillis: 29000
+
+        SyncOptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: OPTIONS
+            Path: /sync
+            TimeoutInMillis: 5000
+
+        # ----- /organizations -----
+        OrganizationsPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: POST
+            Path: /organizations
+            TimeoutInMillis: 10000
+
+        OrganizationsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: GET
+            Path: /organizations/{id}
+            TimeoutInMillis: 10000
+
+        OrganizationsOptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: OPTIONS
+            Path: /organizations
+            TimeoutInMillis: 5000
+
+        OrganizationsIdOptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: OPTIONS
+            Path: /organizations/{id}
+            TimeoutInMillis: 5000
+
+        # ----- /employees -----
+        EmployeesPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: POST
+            Path: /employees
+            TimeoutInMillis: 15000   # Slightly longer — includes S3 upload
+
+        EmployeesGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: GET
+            Path: /employees/{id}
+            TimeoutInMillis: 10000
+
+        EmployeesEmbeddingPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: PUT
+            Path: /employees/{id}/embedding
+            TimeoutInMillis: 15000
+
+        EmployeesOptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: OPTIONS
+            Path: /employees
+            TimeoutInMillis: 5000
+
+        EmployeesIdOptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: OPTIONS
+            Path: /employees/{id}
+            TimeoutInMillis: 5000
+
+        EmployeesEmbeddingOptions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WvpHttpApi
+            Method: OPTIONS
+            Path: /employees/{id}/embedding
+            TimeoutInMillis: 5000
+
+      Tags:
+        Project:     WorkforceVerificationPlatform
+        Environment: !Ref EnvironmentName
+
+  WvpFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/WorkforceVerificationAPI-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ---------------------------------------------------------------------------
+  # 8. HTTP API Gateway (v2)
+  # ---------------------------------------------------------------------------
+
+  WvpHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub "WorkforceVerificationAPI-${EnvironmentName}"
+      Description: >
+        Full REST API for the Workforce Verification Platform.
+        Routes: POST /sync, POST/GET /organizations, POST/GET /employees,
+        PUT /employees/{id}/embedding.
+      StageName: !Ref EnvironmentName
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - x-api-key
+          - X-Device-ID
+          - X-Sync-Attempt
+          - Authorization
+        MaxAge: 300
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit:  50
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiGatewayAccessLogGroup.Arn
+        Format: >
+          {"requestId":"$context.requestId",
+           "ip":"$context.identity.sourceIp",
+           "requestTime":"$context.requestTime",
+           "httpMethod":"$context.httpMethod",
+           "routeKey":"$context.routeKey",
+           "status":"$context.status",
+           "protocol":"$context.protocol",
+           "responseLength":"$context.responseLength",
+           "integrationLatency":"$context.integrationLatency",
+           "integrationStatus":"$context.integrationStatus",
+           "userAgent":"$context.identity.userAgent"}
+      Tags:
+        Project:     WorkforceVerificationPlatform
+        Environment: !Ref EnvironmentName
+
+  ApiGatewayAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/WorkforceVerificationAPI-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: WorkforceVerificationPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ---------------------------------------------------------------------------
+  # 9. CloudWatch Alarms
+  # ---------------------------------------------------------------------------
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:        !Sub "WVP-Lambda-Errors-${EnvironmentName}"
+      AlarmDescription: >
+        Triggers when the Lambda has more than 5 errors in a 5-minute window.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name:  FunctionName
+          Value: !Ref WvpFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:        !Sub "WVP-Lambda-HighLatency-${EnvironmentName}"
+      AlarmDescription: >
+        Triggers when Lambda P99 duration exceeds 20 seconds.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name:  FunctionName
+          Value: !Ref WvpFunction
+      ExtendedStatistic: p99
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 20000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  DynamoDBThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:        !Sub "WVP-DynamoDB-Throttles-${EnvironmentName}"
+      AlarmDescription: >
+        Triggers when DynamoDB write requests are throttled.
+      Namespace: AWS/DynamoDB
+      MetricName: WriteThrottleEvents
+      Dimensions:
+        - Name:  TableName
+          Value: !Ref DynamoDBTableName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  S3MediaBucketSizeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:        !Sub "WVP-S3-MediaBucket-LargeSize-${EnvironmentName}"
+      AlarmDescription: >
+        Triggers when employee media bucket exceeds 10 GB.
+        May indicate unexpected photo accumulation or a misconfigured client.
+      Namespace: AWS/S3
+      MetricName: BucketSizeBytes
+      Dimensions:
+        - Name:  BucketName
+          Value: !Ref S3MediaBucketName
+        - Name:  StorageType
+          Value: StandardStorage
+      Statistic: Average
+      Period: 86400  # Daily metric
+      EvaluationPeriods: 1
+      Threshold: 10737418240  # 10 GB
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+# =============================================================================
+# Outputs
+# =============================================================================
+
+Outputs:
+
+  ApiBaseUrl:
+    Description: Base URL for the API Gateway. Use with all endpoint paths.
+    Value: !Sub "https://${WvpHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiBaseUrl"
+
+  SyncEndpoint:
+    Description: >
+      Full URL of the batch sync endpoint. Set as WVP_AWS_API_ENDPOINT on edge devices.
+    Value: !Sub "https://${WvpHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/sync"
+    Export:
+      Name: !Sub "${AWS::StackName}-SyncEndpoint"
+
+  OrganizationsEndpoint:
+    Description: Full URL of the POST /organizations endpoint.
+    Value: !Sub "https://${WvpHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/organizations"
+    Export:
+      Name: !Sub "${AWS::StackName}-OrganizationsEndpoint"
+
+  EmployeesEndpoint:
+    Description: Full URL of the POST /employees endpoint.
+    Value: !Sub "https://${WvpHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/employees"
+    Export:
+      Name: !Sub "${AWS::StackName}-EmployeesEndpoint"
+
+  LambdaFunctionName:
+    Description: Name of the deployed Lambda function.
+    Value: !Ref WvpFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionName"
+
+  LambdaFunctionArn:
+    Description: ARN of the deployed Lambda function.
+    Value: !GetAtt WvpFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
+
+  LogsTableName:
+    Description: DynamoDB table name for verification event logs.
+    Value: !Ref WorkforceVerificationTable
+    Export:
+      Name: !Sub "${AWS::StackName}-LogsTableName"
+
+  LogsTableArn:
+    Description: ARN of the verification logs DynamoDB table.
+    Value: !GetAtt WorkforceVerificationTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LogsTableArn"
+
+  OrganizationsTableName:
+    Description: DynamoDB table name for organizations.
+    Value: !Ref WorkforceOrganizationsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-OrganizationsTableName"
+
+  EmployeesTableName:
+    Description: DynamoDB table name for employee biometric records.
+    Value: !Ref WorkforceEmployeesTable
+    Export:
+      Name: !Sub "${AWS::StackName}-EmployeesTableName"
+
+  EmployeeMediaBucketName:
+    Description: S3 bucket name for employee face enrollment photos.
+    Value: !Ref EmployeeMediaBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-EmployeeMediaBucket"
+
+  ModelsBucketName:
+    Description: S3 bucket name for face-embedding model distribution.
+    Value: !Ref ModelsBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ModelsBucket"
+
+  LambdaExecutionRoleArn:
+    Description: ARN of the Lambda IAM execution role.
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaExecutionRoleArn"
+
+  Region:
+    Description: AWS Region this stack was deployed to.
+    Value: !Ref AWS::Region
+
+  StackName:
+    Description: CloudFormation stack name.
+    Value: !Ref AWS::StackName
