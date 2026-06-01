@@ -1,21 +1,24 @@
 import cv2
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 import numpy as np
 import random
-import time
+import os
 
 class LivenessChallenge:
     def __init__(self):
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
+        # Initialize FaceLandmarker using the Tasks API
+        base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
+        options = vision.FaceLandmarkerOptions(base_options=base_options,
+                                               output_face_blendshapes=False,
+                                               output_facial_transformation_matrixes=False,
+                                               num_faces=1)
+        self.detector = vision.FaceLandmarker.create_from_options(options)
+        
         self.challenges = ["Blink Twice", "Turn Head Left", "Turn Head Right"]
         
-        # Landmarks
+        # Landmarks (same indices apply for the new API)
         self.LEFT_EYE = [33, 160, 158, 133, 153, 144]
         self.RIGHT_EYE = [362, 385, 387, 263, 373, 380]
         self.NOSE_TIP = 1
@@ -37,15 +40,18 @@ class LivenessChallenge:
         return (v1 + v2) / (2.0 * h)
         
     def check_liveness(self, frame_rgb, current_challenge):
-        results = self.face_mesh.process(frame_rgb)
-        if not results.multi_face_landmarks:
+        # Create MediaPipe Image
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+        
+        # Detect landmarks
+        detection_result = self.detector.detect(mp_image)
+        
+        if not detection_result.face_landmarks:
             return False, "No face detected"
             
-        landmarks = results.multi_face_landmarks[0].landmark
+        landmarks = detection_result.face_landmarks[0]
         
         if current_challenge == "Blink Twice":
-            # Just detecting one blink for simplicity in this frame, 
-            # the caller should track state across frames for "Twice"
             left_points = [(landmarks[i].x, landmarks[i].y) for i in self.LEFT_EYE]
             right_points = [(landmarks[i].x, landmarks[i].y) for i in self.RIGHT_EYE]
             ear = (self.eye_aspect_ratio(left_points) + self.eye_aspect_ratio(right_points)) / 2.0
@@ -76,7 +82,10 @@ class LivenessChallenge:
         return dist_left / (dist_left + dist_right)
 
 if __name__ == "__main__":
-    # Test orchestrator
+    if not os.path.exists("face_landmarker.task"):
+        print("Model file missing. Run setup_models.py first.")
+        exit(1)
+        
     liveness = LivenessChallenge()
     cap = cv2.VideoCapture(0)
     
@@ -99,7 +108,7 @@ if __name__ == "__main__":
         if current_challenge == "Blink Twice":
             if passed and blink_cooldown == 0:
                 blink_count += 1
-                blink_cooldown = 15 # wait 15 frames before next blink counts
+                blink_cooldown = 15
             cv2.putText(frame, f"Blinks: {blink_count}/2", (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
             if blink_count >= 2:
                 current_challenge = random.choice(liveness.challenges)
