@@ -113,18 +113,21 @@ if __name__ == "__main__":
             if passed and blink_cooldown == 0:
                 blink_count += 1
                 blink_cooldown = 15
-            cv2.putText(frame, f"Blinks: {blink_count}/2", (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            # We flip the frame first so the text doesn't appear backwards
+            display_frame = cv2.flip(frame, 1)
+            cv2.putText(display_frame, f"Blinks: {blink_count}/2", (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
             if blink_count >= 2:
                 current_challenge = random.choice(liveness.challenges)
                 blink_count = 0
         else:
+            display_frame = cv2.flip(frame, 1)
             if passed:
                 current_challenge = random.choice(liveness.challenges)
                 
-        cv2.putText(frame, f"Challenge: {current_challenge}", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        cv2.putText(frame, f"Status: {status}", (50, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.putText(display_frame, f"Challenge: {current_challenge}", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        cv2.putText(display_frame, f"Status: {status}", (50, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         
-        cv2.imshow("Liveness Challenge", cv2.flip(frame, 1))
+        cv2.imshow("Liveness Challenge", display_frame)
         
         if cv2.waitKey(5) & 0xFF == ord('q'):
             break
