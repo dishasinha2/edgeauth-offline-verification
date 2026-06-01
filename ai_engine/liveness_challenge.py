@@ -89,6 +89,10 @@ if __name__ == "__main__":
     liveness = LivenessChallenge()
     cap = cv2.VideoCapture(0)
     
+    if not cap.isOpened():
+        print("[ERROR] Could not open webcam. Please ensure your camera is connected and not being used by another application.")
+        exit(1)
+    
     current_challenge = random.choice(liveness.challenges)
     print(f"Initial Challenge: {current_challenge}")
     
