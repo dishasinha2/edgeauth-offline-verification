@@ -907,6 +907,37 @@ def handle_update_employee_embedding(
 # ---------------------------------------------------------------------------
 
 
+def handle_verify_liveness(
+    event: Dict[str, Any], context: Any, request_id: str
+) -> Dict[str, Any]:
+    """
+    POST /verify-liveness
+    Decode a base64 camera frame and run the requested liveness challenge.
+
+    Required body fields:
+      - image     (str): Base64-encoded image
+      - challenge (str): "Blink Twice", "Turn Head Left", or "Turn Head Right"
+    """
+    body, err = _parse_body(event)
+    if err:
+        return err
+
+    try:
+        from backend.local_device.ai_service import verify_liveness_request
+    except Exception as exc:  # pylint: disable=broad-except
+        _log("error", "AI service import failed", request_id=request_id, error=str(exc))
+        return _build_response(500, {
+            "success": False,
+            "challenge": body.get("challenge") if isinstance(body, dict) else None,
+            "status": "AI service unavailable",
+            "request_id": request_id,
+        })
+
+    result = verify_liveness_request(body)
+    result["request_id"] = request_id
+    return _build_response(200, result)
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main AWS Lambda entry point — routes all API Gateway requests.
@@ -919,6 +950,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       POST     /employees               -> handle_create_employee
       GET      /employees/{id}          -> handle_get_employee
       PUT      /employees/{id}/embedding -> handle_update_employee_embedding
+      POST     /verify-liveness         -> handle_verify_liveness
       *        other                    -> 404
     """
     request_id = (
@@ -964,6 +996,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # POST /employees
     if http_method == "POST" and resource_path in ("/employees", "/prod/employees"):
         return handle_create_employee(event, context, request_id)
+
+    # POST /verify-liveness
+    if http_method == "POST" and resource_path in ("/verify-liveness", "/prod/verify-liveness"):
+        return handle_verify_liveness(event, context, request_id)
 
     # GET /employees/{id}
     if http_method == "GET" and (
