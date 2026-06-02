@@ -21,9 +21,9 @@ import math
 import os
 from typing import List, Optional, Tuple
 
-import cv2
-import face_recognition
-import numpy as np
+import cv2  # type: ignore[import-untyped]
+import face_recognition  # type: ignore[import-untyped]
+import numpy as np  # type: ignore[import-untyped]
 
 logger = logging.getLogger("face_recognizer")
 
@@ -163,6 +163,65 @@ def verify(
     """
     score = cosine_similarity(embedding_a, embedding_b)
     return score >= threshold, round(score, 6)
+
+
+def compare_embeddings(
+    embedding_a: np.ndarray,
+    embedding_b: np.ndarray,
+    threshold: float = DEFAULT_VERIFICATION_THRESHOLD,
+) -> Tuple[bool, float]:
+    """
+    Public API alias for verify().
+
+    Compare two face embeddings and return a match decision plus score.
+
+    Args:
+        embedding_a: Query embedding (live frame).
+        embedding_b: Enrolled embedding (from database or storage).
+        threshold:   Cosine similarity threshold for a positive match.
+
+    Returns:
+        (matched: bool, similarity_score: float)
+
+    Example output::
+
+        {"matched": True, "similarity": 0.91}
+    """
+    return verify(embedding_a, embedding_b, threshold)
+
+
+def match_face(
+    live_embedding: np.ndarray,
+    enrolled_embedding: np.ndarray,
+    threshold: float = DEFAULT_VERIFICATION_THRESHOLD,
+) -> Tuple[bool, float]:
+    """
+    Determine whether a live face matches an enrolled face.
+
+    This is the primary entry point for single-user 1-to-1 verification.
+    Both embeddings must be L2-normalized 128-d vectors (as returned by
+    ``extract_embedding()``).
+
+    Args:
+        live_embedding:     128-d embedding from the current camera frame.
+        enrolled_embedding: 128-d embedding stored during enrollment.
+        threshold:          Minimum cosine similarity to accept as a match.
+                            Default is 0.75 (conservative; raise to 0.80 for
+                            higher security sites).
+
+    Returns:
+        (matched: bool, similarity_score: float)
+        ``matched`` is True when score >= threshold.
+        ``similarity_score`` is rounded to 6 decimal places.
+
+    Example::
+
+        emb_live     = extract_embedding(camera_frame)
+        emb_enrolled = list_to_embedding(stored_list)
+        matched, score = match_face(emb_live, emb_enrolled)
+        # → (True, 0.912345)
+    """
+    return verify(live_embedding, enrolled_embedding, threshold)
 
 
 def find_best_match(

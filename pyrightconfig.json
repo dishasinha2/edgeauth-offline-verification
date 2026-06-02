@@ -1,0 +1,21 @@
+{
+  "include": [
+    "ai_engine",
+    "backend"
+  ],
+  "exclude": [
+    "venv",
+    "**/__pycache__"
+  ],
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "typeCheckingMode": "off",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportMissingTypeStubs": "none",
+  "reportUnknownMemberType": "none",
+  "reportAttributeAccessIssue": "none",
+  "useLibraryCodeForTypes": true,
+  "venvPath": ".",
+  "venv": "venv"
+}
