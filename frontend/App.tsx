@@ -15,10 +15,10 @@ import {
   Animated,
   Dimensions,
   StatusBar,
-  SafeAreaView,
   FlatList,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -227,9 +227,8 @@ const LoginScreen = ({ navigation }: any) => {
   }, []);
 
   const roles = [
-    { label: 'Admin',       icon: '🛡️' },
+    { label: 'Admin',       icon: '👑' },
     { label: 'Employee',    icon: '👤' },
-    { label: 'Super Admin', icon: '👑' },
   ];
 
   const handleLogin = () => {
@@ -304,41 +303,59 @@ const LoginScreen = ({ navigation }: any) => {
 // 3. DASHBOARD SCREEN
 
 const DashboardScreen = ({ navigation }: any) => {
+  const { role } = useContext(AuthContext);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
   }, []);
 
-  const quickActions = [
-    { icon: '➕', label: 'Add Employee',   screen: 'Enroll' },
-    { icon: '👤', label: 'Verify Identity', screen: 'Verify' },
-    { icon: '📋', label: 'View Logs',       screen: 'Logs'   },
-    { icon: '📊', label: 'Reports',         screen: 'Reports'},
-    { icon: '☁️', label: 'Pending Sync',    screen: 'Sync', badge: '12' },
-    { icon: '⚙️', label: 'Settings',        screen: 'Profile'},
-  ];
+  const quickActions =
+  role === 'Employee'
+    ? [
+        { icon: '👤', label: 'Verify Identity', screen: 'Verify' },
+        { icon: '📋', label: 'My Logs', screen: 'Logs' },
+        { icon: '⚙️', label: 'My Profile', screen: 'Profile' },
+      ]
+    : role === 'Super Admin'
+    ? [
+        { icon: '➕', label: 'Add Employee', screen: 'Enroll' },
+        { icon: '👥', label: 'Manage Users', screen: 'Employees' },
+        { icon: '📊', label: 'Analytics', screen: 'Reports' },
+        { icon: '📋', label: 'View Logs', screen: 'Logs' },
+        { icon: '⚙️', label: 'System Settings', screen: 'Profile' },
+      ]
+    : [
+        { icon: '➕', label: 'Add Employee', screen: 'Enroll' },
+        { icon: '👤', label: 'Verify Identity', screen: 'Verify' },
+        { icon: '📋', label: 'View Logs', screen: 'Logs' },
+        { icon: '📊', label: 'Reports', screen: 'Reports' },
+        { icon: '☁️', label: 'Pending Sync', screen: 'Sync', badge: '12' },
+        { icon: '⚙️', label: 'Settings', screen: 'Profile' },
+      ];
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar barStyle="light-content" backgroundColor={T.bg} />
-      <OfflineBanner />
-      <ScrollView showsVerticalScrollIndicator={false}>
+      {role !== 'Employee' && <OfflineBanner />}
+      <ScrollView
+     showsVerticalScrollIndicator={false}
+     contentContainerStyle={{ paddingTop: 12 }}>
         <Animated.View style={{ opacity: fadeAnim }}>
           {/* Header */}
           <View style={styles.dashHeader}>
             <View>
               <Text style={styles.dashGreeting}>Hello,</Text>
-              <Text style={styles.dashName}>Admin</Text>
-              <Text style={styles.dashOrg}>Bennett University</Text>
+              <Text style={styles.dashName}>{role}</Text>
+              <Text style={styles.dashOrg}>
+              {role === 'Employee'
+              ? 'Employee Portal'
+              : role === 'Super Admin'
+             ? 'System Administration'
+             : 'Bennett University'}
+             </Text>
             </View>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <View style={styles.iconBtn}>
-                <Text style={{ fontSize: 16 }}>🔔</Text>
-                <View style={styles.notifBadge}><Text style={{ color: '#fff', fontSize: 8, fontWeight: '800' }}>3</Text></View>
-              </View>
-              <View style={styles.iconBtn}><Text style={{ fontSize: 16 }}>☰</Text></View>
-            </View>
+            <View style={{ width: 80 }} />
           </View>
 
           
@@ -578,12 +595,16 @@ const ResultScreen = ({ navigation }: any) => {
     <SafeAreaView style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar barStyle="light-content" backgroundColor={T.bg} />
       <View style={styles.resultTopBar}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('Dashboard')}>
-          <Text style={{ color: T.text, fontSize: 18 }}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.screenTitle}>Verification Result</Text>
-        <View style={{ width: 36 }} />
-      </View>
+     <TouchableOpacity
+     style={styles.backBtn}
+     onPress={() => navigation.goBack()}>
+     <Text style={{ color: T.text, fontSize: 18 }}>←</Text>
+     </TouchableOpacity>
+
+     <Text style={styles.screenTitle}>Verification Result</Text>
+
+     <View style={{ width: 36 }} />
+     </View>
 
       <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
         
@@ -627,10 +648,10 @@ const ResultScreen = ({ navigation }: any) => {
         </View>
 
         <PrimaryBtn
-          label="Back to Dashboard"
-          onPress={() => navigation.navigate('Dashboard')}
-          style={{ marginTop: 8 }}
-        />
+        label="Back to Dashboard"
+        onPress={() => navigation.goBack()}
+        style={{ marginTop: 8 }}
+       />
         <SecondaryBtn
           label="View All Logs"
           onPress={() => navigation.navigate('Logs')}
@@ -1152,13 +1173,54 @@ const ProfileScreen = ({ navigation }: any) => {
 // BOTTOM TAB BAR  
 
 const TabBar = ({ state, navigation }: any) => {
-  const tabs = [
-    { name: 'Dashboard', icon: '🏠', label: 'Home'      },
-    { name: 'Employees', icon: '👥', label: 'Employees' },
-    { name: 'Logs',      icon: '📋', label: 'Logs'      },
-    { name: 'Profile',   icon: '👤', label: 'Profile'   },
-  ];
+  const { role } = useContext(AuthContext);
 
+  const tabs =
+    role === 'Employee'
+      ? [
+          { name: 'Dashboard', icon: '🏠', label: 'Home' },
+          { name: 'Profile', icon: '👤', label: 'Profile' },
+        ]
+      : [
+          { name: 'Dashboard', icon: '🏠', label: 'Home' },
+          { name: 'Employees', icon: '👥', label: 'Employees' },
+          { name: 'Logs', icon: '📋', label: 'Logs' },
+          { name: 'Profile', icon: '👤', label: 'Profile' },
+        ];
+    
+  if (role === 'Employee') {
+  return (
+    <View style={styles.tabBar}>
+      <TouchableOpacity
+        style={[styles.tabItem, state.index === 0 && styles.tabItemActive]}
+        onPress={() => navigation.navigate('Dashboard')}
+        activeOpacity={0.8}>
+        <Text style={{ fontSize: 20 }}>🏠</Text>
+        <Text style={[styles.tabLabel, state.index === 0 && { color: T.accent }]}>
+          Home
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.tabFab}
+        onPress={() => navigation.navigate('Verify')}
+        activeOpacity={0.85}>
+        <Text style={{ fontSize: 26 }}>🛡️</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.tabItem, state.index === 1 && styles.tabItemActive]}
+        onPress={() => navigation.navigate('Profile')}
+        activeOpacity={0.8}>
+        <Text style={{ fontSize: 20 }}>👤</Text>
+        <Text style={[styles.tabLabel, state.index === 1 && { color: T.accent }]}>
+          Profile
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+  
   return (
     <View style={styles.tabBar}>
       {tabs.slice(0, 2).map((t, i) => {
@@ -1203,16 +1265,40 @@ const TabBar = ({ state, navigation }: any) => {
 
 // MAIN TABS NAVIGATOR
 
-const MainTabs = () => (
-  <Tab.Navigator
-    tabBar={props => <TabBar {...props} />}
-    screenOptions={{ headerShown: false }}>
-    <Tab.Screen name="Dashboard" component={DashboardScreen} />
-    <Tab.Screen name="Employees" component={EmployeesScreen} />
-    <Tab.Screen name="Logs"      component={LogsScreen}      />
-    <Tab.Screen name="Profile"   component={ProfileScreen}   />
-  </Tab.Navigator>
-);
+const MainTabs = () => {
+  const { role } = useContext(AuthContext);
+
+  return (
+    <Tab.Navigator
+      tabBar={props => <TabBar {...props} />}
+      screenOptions={{ headerShown: false }}
+    >
+      <Tab.Screen
+        name="Dashboard"
+        component={DashboardScreen}
+      />
+
+      {role !== 'Employee' && (
+        <Tab.Screen
+          name="Employees"
+          component={EmployeesScreen}
+        />
+      )}
+
+      {role !== 'Employee' && (
+        <Tab.Screen
+          name="Logs"
+          component={LogsScreen}
+        />
+      )}
+
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+      />
+    </Tab.Navigator>
+  );
+};
 
 
 // MAIN APP STACK  
@@ -1479,7 +1565,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 20,
-    paddingVertical: 8,
+    paddingTop: 18,
+    paddingBottom: 8,
     backgroundColor: 'rgba(255,82,82,0.1)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,82,82,0.3)',
