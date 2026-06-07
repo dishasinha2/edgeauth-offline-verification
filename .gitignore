@@ -36,7 +36,15 @@ ai_engine/spoof_demo_photo.jpg
 
 # Model files (large binaries — download separately)
 ai_engine/*.task
+ai_engine/models/*.tflite
+ai_engine/models/*.onnx
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Environment secrets — NEVER commit real credentials
+.env
+
+# Local export archives
+*-exports/

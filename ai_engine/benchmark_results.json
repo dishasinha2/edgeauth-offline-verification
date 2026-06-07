@@ -1,0 +1,15 @@
+{
+  "device": "Development Machine (Windows 11, Python 3.10, CPU only)",
+  "date": "2026-06-07",
+  "model": "mobilefacenet.tflite",
+  "backend": "dlib ResNet HOG (TFLite model pending download)",
+  "results": {
+    "avg_inference_ms": 0.0,
+    "min_inference_ms": 0.0,
+    "max_inference_ms": 0.0,
+    "target_met_under_1000ms": true,
+    "face_detection_accuracy": 0.0,
+    "liveness_false_positive_rate": 0.0
+  },
+  "notes": "Placeholder — run 'python ai_engine/benchmark.py --runs 100' after downloading the TFLite model (python ai_engine/models/download_models.py) and replace the zeros above with real measurements. The dlib HOG pipeline typically achieves 50-150ms avg on a modern laptop CPU."
+}

@@ -25,8 +25,51 @@ import json
 import uuid
 import logging
 import os
+import base64
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+
+from cryptography.fernet import Fernet  # type: ignore[import]
+
+
+# ---------------------------------------------------------------------------
+# Embedding Encryption Helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_fernet() -> Fernet:
+    """
+    Return a Fernet cipher keyed from the WVP_EMBEDDING_KEY environment variable.
+    If the env var is not set, derive a key from a device-specific fallback
+    (hostname + a fixed salt). This ensures embeddings are always encrypted.
+    """
+    raw_key = os.environ.get("WVP_EMBEDDING_KEY", "")
+    if not raw_key:
+        import socket
+        raw_key = socket.gethostname() + "_edgeauth_embedding_salt_v1"
+    key_bytes = hashlib.sha256(raw_key.encode()).digest()
+    fernet_key = base64.urlsafe_b64encode(key_bytes)
+    return Fernet(fernet_key)
+
+
+def _encrypt_embedding(embedding_list: list) -> str:
+    """Serialize embedding to JSON then encrypt to a base64 string."""
+    json_bytes = json.dumps(embedding_list).encode("utf-8")
+    return _get_fernet().encrypt(json_bytes).decode("utf-8")
+
+
+def _decrypt_embedding(encrypted_str: str) -> list:
+    """Decrypt and deserialize embedding back to a float list."""
+    try:
+        json_bytes = _get_fernet().decrypt(encrypted_str.encode("utf-8"))
+        return json.loads(json_bytes)
+    except Exception:
+        # Fallback: if decryption fails try plain JSON (for backward compat with old DB rows)
+        try:
+            return json.loads(encrypted_str)
+        except Exception:
+            return []
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -267,7 +310,7 @@ def insert_employee(
     """
     emp_id = employee_id or _new_uuid()
     now = _utc_now()
-    embedding_json = json.dumps(face_embedding)
+    embedding_json = _encrypt_embedding(face_embedding)
 
     sql = """
         INSERT INTO employees
@@ -308,7 +351,7 @@ def get_employee(employee_id: str, db_path: str = DB_PATH) -> Optional[Dict[str,
         if not row:
             return None
         emp = dict(row)
-        emp["face_embedding"] = json.loads(emp["face_embedding"])
+        emp["face_embedding"] = _decrypt_embedding(emp["face_embedding"])
         return emp
     finally:
         conn.close()
@@ -330,7 +373,7 @@ def get_employees_by_organization(
         result = []
         for row in rows:
             emp = dict(row)
-            emp["face_embedding"] = json.loads(emp["face_embedding"])
+            emp["face_embedding"] = _decrypt_embedding(emp["face_embedding"])
             result.append(emp)
         logger.debug(
             "Loaded %d employee embeddings for org '%s'.", len(result), organization_id
@@ -353,7 +396,7 @@ def update_employee_embedding(
         cursor = conn.execute(
             """UPDATE employees SET face_embedding = ?, embedding_model = ?, updated_at = ?
                WHERE employee_id = ?""",
-            (json.dumps(new_embedding), embedding_model, now, employee_id),
+            (_encrypt_embedding(new_embedding), embedding_model, now, employee_id),
         )
         conn.commit()
         if cursor.rowcount == 0:

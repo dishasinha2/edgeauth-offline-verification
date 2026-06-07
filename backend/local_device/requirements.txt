@@ -21,6 +21,9 @@
 # HTTP client for AWS API Gateway sync POST
 requests==2.32.3
 
+# AES encryption for face embeddings at rest (database.py: _encrypt_embedding / _decrypt_embedding)
+cryptography>=42.0.0
+
 # ---------------------------------------------------------------------------
 # OPTIONAL — S3 Model Distribution (sync_engine.py: fetch_model_updates_from_s3)
 #
