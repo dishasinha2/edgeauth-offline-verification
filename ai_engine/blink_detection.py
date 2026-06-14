@@ -3,26 +3,6 @@ import mediapipe as mp
 import numpy as np
 import time
 
-LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144]
-RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380]
-EAR_THRESHOLD = 0.20
-
-_face_mesh = None
-
-
-def _get_face_mesh():
-    global _face_mesh
-    if _face_mesh is None:
-        mp_face_mesh = mp.solutions.face_mesh
-        _face_mesh = mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-    return _face_mesh
-
-
 def euclidean_distance(point1, point2):
     return np.linalg.norm(np.array(point1) - np.array(point2))
 
@@ -39,40 +19,6 @@ def eye_aspect_ratio(eye_points):
     ear = (v1 + v2) / (2.0 * h)
     return ear
 
-
-def verify_blink(image_bgr):
-    """
-    Backend-callable blink verification.
-    Accepts an OpenCV BGR image and returns a JSON-compatible dictionary.
-    """
-    if image_bgr is None:
-        return {"success": False, "status": "Invalid image"}
-
-    h, w, _ = image_bgr.shape
-    rgb_frame = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    results = _get_face_mesh().process(rgb_frame)
-
-    if not results.multi_face_landmarks:
-        return {"success": False, "status": "No face detected"}
-
-    landmarks = results.multi_face_landmarks[0].landmark
-
-    def get_coords(indices):
-        return [(int(landmarks[idx].x * w), int(landmarks[idx].y * h)) for idx in indices]
-
-    left_eye_points = get_coords(LEFT_EYE_INDICES)
-    right_eye_points = get_coords(RIGHT_EYE_INDICES)
-
-    left_ear = eye_aspect_ratio(left_eye_points)
-    right_ear = eye_aspect_ratio(right_eye_points)
-    avg_ear = (left_ear + right_ear) / 2.0
-
-    if avg_ear < EAR_THRESHOLD:
-        return {"success": True, "status": "Blink Detected!", "ear": float(avg_ear)}
-
-    return {"success": False, "status": "Eyes Open", "ear": float(avg_ear)}
-
-
 def main():
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(
@@ -82,7 +28,14 @@ def main():
         min_tracking_confidence=0.5
     )
 
-    cap = cv2.VideoCapture(0)
+    # Left eye landmarks: 33, 160, 158, 133, 153, 144
+    LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144]
+    # Right eye landmarks: 362, 385, 387, 263, 373, 380
+    RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380]
+
+    EAR_THRESHOLD = 0.20
+
+    cap = cv2.VideoCapture(2)
 
     print("Starting Blink Detection Test. Press 'q' to quit.")
 

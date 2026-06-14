@@ -6,13 +6,10 @@ import numpy as np
 import random
 import os
 
-MODEL_ASSET_PATH = os.path.join(os.path.dirname(__file__), "face_landmarker.task")
-
-
 class LivenessChallenge:
     def __init__(self):
         # Initialize FaceLandmarker using the Tasks API
-        base_options = python.BaseOptions(model_asset_path=MODEL_ASSET_PATH)
+        base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
         options = vision.FaceLandmarkerOptions(base_options=base_options,
                                                output_face_blendshapes=False,
                                                output_facial_transformation_matrixes=False,
@@ -84,46 +81,13 @@ class LivenessChallenge:
         if (dist_left + dist_right) == 0: return 0.5
         return dist_left / (dist_left + dist_right)
 
-
-_liveness_challenge = None
-
-
-def _get_liveness_challenge():
-    global _liveness_challenge
-    if _liveness_challenge is None:
-        _liveness_challenge = LivenessChallenge()
-    return _liveness_challenge
-
-
-def verify_liveness(image_bgr, challenge):
-    """
-    Backend-callable liveness verification.
-    Accepts an OpenCV BGR image and returns a JSON-compatible dictionary.
-    """
-    if image_bgr is None:
-        return {
-            "success": False,
-            "challenge": challenge,
-            "status": "Invalid image"
-        }
-
-    rgb_frame = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    passed, status = _get_liveness_challenge().check_liveness(rgb_frame, challenge)
-
-    return {
-        "success": bool(passed),
-        "challenge": challenge,
-        "status": status
-    }
-
-
 if __name__ == "__main__":
-    if not os.path.exists(MODEL_ASSET_PATH):
+    if not os.path.exists("face_landmarker.task"):
         print("Model file missing. Run setup_models.py first.")
         exit(1)
         
     liveness = LivenessChallenge()
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(2)
     
     if not cap.isOpened():
         print("[ERROR] Could not open webcam. Please ensure your camera is connected and not being used by another application.")
@@ -158,6 +122,19 @@ if __name__ == "__main__":
         else:
             display_frame = cv2.flip(frame, 1)
             if passed:
+                status = "Challenge Passed!"
+                cv2.putText(
+                    display_frame,
+                    status,
+                    (50, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0,255,0),
+                    2
+                )
+                cv2.imshow("Liveness Challenge", display_frame)
+                cv2.waitKey(1000)
+        
                 current_challenge = random.choice(liveness.challenges)
                 
         cv2.putText(display_frame, f"Challenge: {current_challenge}", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)

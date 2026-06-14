@@ -12,7 +12,7 @@ def main():
     mp_drawing = mp.solutions.drawing_utils
     mp_drawing_styles = mp.solutions.drawing_styles
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(2)
 
     print("Starting Face Mesh Test. Press 'q' to quit.")
 
