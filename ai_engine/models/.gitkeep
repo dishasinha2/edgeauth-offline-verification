@@ -1,0 +1,3 @@
+# This file ensures the models/ directory is tracked by Git.
+# Compiled TFLite model files (.tflite) are gitignored.
+# Run ai_engine/convert_to_tflite.py to generate them.

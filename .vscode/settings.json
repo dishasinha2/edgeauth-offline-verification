@@ -1,0 +1,13 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/ai_engine",
+    "${workspaceFolder}/backend/local_device"
+  ],
+  "python.analysis.typeCheckingMode": "off",
+  "python.analysis.ignore": [
+    "**/ai_engine/**",
+    "**/backend/**"
+  ],
+  "pylance.reportMissingModuleSource": "none"
+}

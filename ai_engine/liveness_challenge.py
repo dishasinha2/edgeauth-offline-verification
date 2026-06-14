@@ -16,7 +16,7 @@ class LivenessChallenge:
                                                num_faces=1)
         self.detector = vision.FaceLandmarker.create_from_options(options)
         
-        self.challenges = ["Blink Twice", "Turn Head Left", "Turn Head Right"]
+        self.challenges = ["Blink Twice", "Turn Head Left", "Turn Head Right", "Smile"]
         
         # Landmarks (same indices apply for the new API)
         self.LEFT_EYE = [33, 160, 158, 133, 153, 144]
@@ -24,10 +24,19 @@ class LivenessChallenge:
         self.NOSE_TIP = 1
         self.LEFT_CHEEK = 234
         self.RIGHT_CHEEK = 454
+
+        # Mouth landmarks for smile detection
+        self.MOUTH_LEFT = 61     # Left mouth corner
+        self.MOUTH_RIGHT = 291   # Right mouth corner
+        self.MOUTH_TOP = 13      # Upper lip centre
+        self.MOUTH_BOTTOM = 14   # Lower lip centre
         
         self.EAR_THRESHOLD = 0.20
         self.HEAD_TURN_LEFT_THRESHOLD = 0.35
         self.HEAD_TURN_RIGHT_THRESHOLD = 0.65
+        # Smile: mouth width / mouth height ratio threshold.
+        # A neutral face is ~3-4; a smile pushes it above 5.
+        self.SMILE_RATIO_THRESHOLD = 5.0
 
     def euclidean_distance(self, point1, point2):
         return np.linalg.norm(np.array(point1) - np.array(point2))
@@ -67,6 +76,11 @@ class LivenessChallenge:
             ratio = self.get_head_pose_ratio(landmarks)
             if ratio > self.HEAD_TURN_RIGHT_THRESHOLD:
                 return True, "Turned Right"
+
+        elif current_challenge == "Smile":
+            smile_ratio = self.get_mouth_ratio(landmarks)
+            if smile_ratio > self.SMILE_RATIO_THRESHOLD:
+                return True, "Smiled"
                 
         return False, "Pending"
 
@@ -80,6 +94,22 @@ class LivenessChallenge:
         
         if (dist_left + dist_right) == 0: return 0.5
         return dist_left / (dist_left + dist_right)
+
+    def get_mouth_ratio(self, landmarks):
+        """Compute mouth width / mouth height ratio.
+        A higher ratio (>5) indicates a smile.
+        """
+        mouth_left  = np.array([landmarks[self.MOUTH_LEFT].x,  landmarks[self.MOUTH_LEFT].y])
+        mouth_right = np.array([landmarks[self.MOUTH_RIGHT].x, landmarks[self.MOUTH_RIGHT].y])
+        mouth_top   = np.array([landmarks[self.MOUTH_TOP].x,   landmarks[self.MOUTH_TOP].y])
+        mouth_bot   = np.array([landmarks[self.MOUTH_BOTTOM].x, landmarks[self.MOUTH_BOTTOM].y])
+
+        width  = self.euclidean_distance(mouth_left, mouth_right)
+        height = self.euclidean_distance(mouth_top, mouth_bot)
+
+        if height < 1e-6:
+            return 0.0
+        return width / height
 
 if __name__ == "__main__":
     if not os.path.exists("face_landmarker.task"):

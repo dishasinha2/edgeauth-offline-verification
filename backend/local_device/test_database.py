@@ -478,6 +478,117 @@ class TestSyncQueue:
 
 
 # =============================================================================
+# Multi-Organization Isolation Tests  (Task 1E)
+# =============================================================================
+
+class TestMultiOrgIsolation:
+    """
+    Verify that get_employees_by_organization() returns ONLY the employees
+    belonging to the requested organization, never bleeding across org boundaries.
+    This is the critical multi-tenancy safety invariant.
+    """
+
+    def _make_embedding(self, seed: int, dims: int = 512) -> list:
+        import math, random as _rnd
+        rng = _rnd.Random(seed)
+        raw = [rng.gauss(0, 1) for _ in range(dims)]
+        mag = math.sqrt(sum(v ** 2 for v in raw))
+        return [round(v / mag, 8) for v in raw]
+
+    def test_org_a_does_not_see_org_b_employees(self, db_path):
+        """
+        Employees enrolled under Org B must NEVER appear in Org A's query
+        and vice versa.
+        """
+        # Create two completely separate organizations
+        org_a_id = insert_organization("Org Alpha", "APAC", db_path=db_path)
+        org_b_id = insert_organization("Org Beta",  "EMEA", db_path=db_path)
+
+        # Enroll one employee in each org
+        emp_a_id = insert_employee(
+            organization_id=org_a_id,
+            full_name="Alice (Org Alpha)",
+            face_embedding=self._make_embedding(seed=1),
+            db_path=db_path,
+        )
+        emp_b_id = insert_employee(
+            organization_id=org_b_id,
+            full_name="Bob (Org Beta)",
+            face_embedding=self._make_embedding(seed=2),
+            db_path=db_path,
+        )
+
+        # Query each org's employee list
+        alpha_employees = get_employees_by_organization(org_a_id, db_path=db_path)
+        beta_employees  = get_employees_by_organization(org_b_id, db_path=db_path)
+
+        alpha_ids = {emp["employee_id"] for emp in alpha_employees}
+        beta_ids  = {emp["employee_id"] for emp in beta_employees}
+
+        # Org A must contain Alice, NOT Bob
+        assert emp_a_id in alpha_ids, "Alice must appear in Org Alpha's employee list"
+        assert emp_b_id not in alpha_ids, (
+            "Bob (Org Beta) must NOT appear in Org Alpha's employee list — "
+            "multi-org isolation violated!"
+        )
+
+        # Org B must contain Bob, NOT Alice
+        assert emp_b_id in beta_ids, "Bob must appear in Org Beta's employee list"
+        assert emp_a_id not in beta_ids, (
+            "Alice (Org Alpha) must NOT appear in Org Beta's employee list — "
+            "multi-org isolation violated!"
+        )
+
+    def test_org_isolation_with_multiple_employees(self, db_path):
+        """
+        Multiple employees in each org — cross-org leakage must be zero.
+        """
+        org_x_id = insert_organization("Org X", "US-EAST", db_path=db_path)
+        org_y_id = insert_organization("Org Y", "US-WEST", db_path=db_path)
+
+        # Insert 3 employees in Org X
+        x_ids = set()
+        for i in range(3):
+            x_ids.add(insert_employee(
+                organization_id=org_x_id,
+                full_name=f"X-Employee-{i}",
+                face_embedding=self._make_embedding(seed=10 + i),
+                db_path=db_path,
+            ))
+
+        # Insert 2 employees in Org Y
+        y_ids = set()
+        for i in range(2):
+            y_ids.add(insert_employee(
+                organization_id=org_y_id,
+                full_name=f"Y-Employee-{i}",
+                face_embedding=self._make_embedding(seed=20 + i),
+                db_path=db_path,
+            ))
+
+        x_results = {e["employee_id"] for e in get_employees_by_organization(org_x_id, db_path=db_path)}
+        y_results = {e["employee_id"] for e in get_employees_by_organization(org_y_id, db_path=db_path)}
+
+        # Correct counts
+        assert len(x_results) == 3, f"Org X should have 3 employees, got {len(x_results)}"
+        assert len(y_results) == 2, f"Org Y should have 2 employees, got {len(y_results)}"
+
+        # No overlap between the two sets
+        overlap = x_results & y_results
+        assert not overlap, (
+            f"Cross-org isolation failed — {len(overlap)} employee(s) appear in both orgs: {overlap}"
+        )
+
+    def test_empty_org_returns_empty_list(self, db_path):
+        """An org with no employees must return an empty list, not None or an error."""
+        org_id = insert_organization("Empty Org", "TEST", db_path=db_path)
+        employees = get_employees_by_organization(org_id, db_path=db_path)
+        assert employees == [], (
+            f"Empty org should return [], got {employees!r}"
+        )
+
+
+# =============================================================================
 # Helpers
 # =============================================================================
 

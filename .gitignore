@@ -14,3 +14,37 @@ frontend/node_modules/
 frontend/ios/Pods/
 frontend/ios/build/
 frontend/ios/.xcode.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+
+# SQLite databases
+*.db
+*.db-wal
+*.db-shm
+
+# AI Engine — enrollment photos & spoof demo captures
+ai_engine/enrollments/
+ai_engine/spoof_demo_photo.jpg
+
+# Model files (large binaries — download separately)
+ai_engine/*.task
+ai_engine/models/*.tflite
+ai_engine/models/*.onnx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment secrets — NEVER commit real credentials
+.env
+
+# Local export archives
+*-exports/
